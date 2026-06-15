@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>arguslib viewer</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header>
+    <h1>arguslib viewer</h1>
+    <span id="status" class="status"></span>
+  </header>
+
+  <main>
+    <section class="controls">
+      <label>Instrument
+        <select id="instrument"></select>
+      </label>
+
+      <label>Date (UTC)
+        <input type="date" id="date" />
+      </label>
+
+      <label>Time <span id="time-readout" class="mono"></span>
+        <input type="range" id="time" min="0" max="86395" step="5" value="43200" />
+      </label>
+
+      <label>Assumed feature altitude: <span id="alt-readout" class="mono">10.0 km</span>
+        <input type="range" id="altitude" min="0.5" max="15" step="0.1" value="10" />
+      </label>
+
+      <p class="hint">Click anywhere on the image to geolocate at the assumed altitude.</p>
+    </section>
+
+    <section class="viewport">
+      <canvas id="canvas" width="800" height="800"></canvas>
+    </section>
+
+    <section class="readout">
+      <h2>Fix</h2>
+      <table>
+        <tr><th>lon</th><td id="r-lon" class="mono">—</td></tr>
+        <tr><th>lat</th><td id="r-lat" class="mono">—</td></tr>
+        <tr><th>alt</th><td id="r-alt" class="mono">—</td></tr>
+        <tr><th>elev</th><td id="r-elev" class="mono">—</td></tr>
+        <tr><th>azim</th><td id="r-azim" class="mono">—</td></tr>
+        <tr><th>range</th><td id="r-range" class="mono">—</td></tr>
+        <tr><th>back-proj err</th><td id="r-err" class="mono">—</td></tr>
+      </table>
+      <button id="copy">Copy lon,lat</button>
+      <p id="warn" class="warn"></p>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

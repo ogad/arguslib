@@ -1,0 +1,57 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #14171c;
+  color: #e6e9ef;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid #2a2f3a;
+}
+header h1 { font-size: 1.1rem; margin: 0; }
+.status { color: #8b94a7; font-size: 0.85rem; }
+main {
+  display: grid;
+  grid-template-columns: 18rem 1fr 16rem;
+  gap: 1rem;
+  padding: 1rem;
+  align-items: start;
+}
+.controls label {
+  display: block;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  color: #b7bECd;
+}
+.controls select,
+.controls input[type="date"] { width: 100%; margin-top: 0.25rem; }
+.controls input[type="range"] { width: 100%; }
+.hint, .warn { font-size: 0.8rem; color: #8b94a7; }
+.warn { color: #e0a458; min-height: 1.2rem; }
+.viewport {
+  background: #0c0e12;
+  border: 1px solid #2a2f3a;
+  border-radius: 6px;
+  display: flex;
+  justify-content: center;
+}
+#canvas { max-width: 100%; height: auto; cursor: crosshair; }
+.readout table { width: 100%; border-collapse: collapse; }
+.readout th { text-align: left; color: #8b94a7; font-weight: 500; padding-right: 0.5rem; }
+.readout td { text-align: right; }
+.mono { font-family: ui-monospace, Menlo, monospace; }
+button {
+  margin-top: 0.6rem;
+  background: #2b6cb0;
+  border: 0;
+  color: white;
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+button:hover { background: #3179c2; }
