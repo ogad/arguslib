@@ -171,17 +171,54 @@ $("copy").addEventListener("click", () => {
   if (lon !== "—") navigator.clipboard.writeText(`${lon},${lat}`);
 });
 
-$("instrument").addEventListener("change", () => scheduleFrame(0));
-$("date").addEventListener("change", () => scheduleFrame(0));
+const FULL_DAY = { min: 1, max: 86396 };
+const secOfDay = (iso) => {
+  const [h, m, s] = iso.slice(11, 19).split(":").map(Number);
+  return h * 3600 + m * 60 + s;
+};
+
+// Bound the time slider to the day's actual first/last image times (UTC), and
+// clamp the current value into range. Falls back to a full day when bounds are
+// unavailable. Runs on instrument/date change (the server caches per day).
+async function updateBounds() {
+  const id = $("instrument").value;
+  const date = $("date").value;
+  const slider = $("time");
+  if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+
+  let bounds = FULL_DAY;
+  setStatus("checking image times…");
+  try {
+    const resp = await fetch(
+      `/api/instruments/${encodeURIComponent(id)}/timeindex?date=${date}`
+    );
+    const idx = await resp.json();
+    if (idx.start && idx.end) {
+      bounds = { min: Math.max(1, secOfDay(idx.start)), max: secOfDay(idx.end) };
+      setStatus(`data ${idx.start.slice(11, 19)}–${idx.end.slice(11, 19)} UTC`);
+    } else {
+      setStatus("no image-time bounds for this day");
+    }
+  } catch {
+    /* leave full-day bounds */
+  }
+  slider.min = bounds.min;
+  slider.max = bounds.max;
+  slider.value = Math.min(Math.max(parseInt(slider.value, 10), bounds.min), bounds.max);
+  currentDatetime();
+}
+
+$("instrument").addEventListener("change", async () => { await updateBounds(); scheduleFrame(0); });
+$("date").addEventListener("change", async () => { await updateBounds(); scheduleFrame(0); });
 
 // Keep the overlaid native picker seeded from whatever is typed, and sync the
 // chosen ISO value back to the text field (preserving the YYYY-MM-DD format).
 $("date").addEventListener("input", () => {
   if (/^\d{4}-\d{2}-\d{2}$/.test($("date").value)) $("date-native").value = $("date").value;
 });
-$("date-native").addEventListener("change", () => {
+$("date-native").addEventListener("change", async () => {
   const v = $("date-native").value;
-  if (v) { $("date").value = v; scheduleFrame(0); }
+  if (v) { $("date").value = v; await updateBounds(); scheduleFrame(0); }
 });
 $("time").addEventListener("input", () => { currentDatetime(); scheduleFrame(); });
 $("altitude").addEventListener("input", () => {
@@ -199,6 +236,6 @@ const DEFAULTS = { instrument: "COBALT:3-7", date: "2025-05-01" }; // time set i
   }
   $("date").value = DEFAULTS.date;
   $("date-native").value = DEFAULTS.date;
-  currentDatetime();
+  await updateBounds();
   loadFrame();
 })();

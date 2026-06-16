@@ -48,11 +48,20 @@ def create_app() -> Flask:
     def instruments():
         return jsonify(registry.list_instruments())
 
+    timeindex_cache = {}
+
     @app.route("/api/instruments/<path:instrument_id>/timeindex")
     def timeindex(instrument_id):
         date = _parse_dt(request.args.get("date") + "T00:00:00").date()
-        cam = registry.get(instrument_id)
-        return jsonify(day_index(cam, date))
+        key = (instrument_id, date.isoformat())
+        cached = timeindex_cache.get(key)
+        if cached is None:
+            cam = registry.get(instrument_id)
+            cached = day_index(
+                cam, date, decode_lock=frames.decode_lock(instrument_id)
+            )
+            timeindex_cache[key] = cached
+        return jsonify(cached)
 
     @app.route("/api/frame")
     def frame():

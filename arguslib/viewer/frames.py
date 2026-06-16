@@ -37,6 +37,11 @@ class FrameService:
         self._decode_locks: Dict[str, Lock] = {}
         self._decode_locks_guard = Lock()
 
+    def decode_lock(self, instrument_id: str) -> Lock:
+        """Per-instrument decode lock, also used to serialize one-off bounds
+        probing (timeindex) with frame decodes for the same camera."""
+        return self._decode_lock(instrument_id)
+
     def _decode_lock(self, instrument_id: str) -> Lock:
         with self._decode_locks_guard:
             lock = self._decode_locks.get(instrument_id)
