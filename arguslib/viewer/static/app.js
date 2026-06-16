@@ -14,6 +14,7 @@ const state = {
   tracks: [], // aircraft track overlay (full-res pixel polylines)
   selectedIcao: null,
   copyLatLon: null, // [lon, lat] backing the Copy button
+  northUpDeg: 0, // canvas rotation (deg, CW) to put north at the top
 };
 
 function setStatus(msg) { $("status").textContent = msg || ""; }
@@ -78,6 +79,7 @@ async function loadFrame() {
     }
     state.full.w = parseInt(resp.headers.get("X-Full-Width"), 10);
     state.full.h = parseInt(resp.headers.get("X-Full-Height"), 10);
+    state.northUpDeg = parseFloat(resp.headers.get("X-North-Up-Deg")) || 0;
     const ts = resp.headers.get("X-Timestamp");
     const blob = await resp.blob();
     const bitmap = await createImageBitmap(blob);
@@ -159,10 +161,31 @@ function drawTracks() {
   ctx.globalAlpha = 1;
 }
 
+// View rotation: when "North up" is on, rotate the whole canvas (image +
+// annotations) about its centre. Clicks are inverse-rotated to map back.
+const viewAngleRad = () =>
+  ($("northup").checked ? state.northUpDeg * Math.PI / 180 : 0);
+
+function unrotateCanvasPoint(cx, cy) {
+  const a = viewAngleRad();
+  if (!a) return [cx, cy];
+  const ox = canvas.width / 2, oy = canvas.height / 2;
+  const c = Math.cos(-a), s = Math.sin(-a), x = cx - ox, y = cy - oy;
+  return [c * x - s * y + ox, s * x + c * y + oy];
+}
+
 function drawCanvas() {
   if (!state.img) { ctx.clearRect(0, 0, canvas.width, canvas.height); return; }
   canvas.width = state.img.width;
   canvas.height = state.img.height;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  const a = viewAngleRad();
+  if (a) {
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(a);
+    ctx.translate(-canvas.width / 2, -canvas.height / 2);
+  }
   ctx.drawImage(state.img, 0, 0);
   drawTracks();
   if (state.marker) {
@@ -176,6 +199,7 @@ function drawCanvas() {
     ctx.moveTo(x, y - 14); ctx.lineTo(x, y + 14);
     ctx.stroke();
   }
+  ctx.restore();
 }
 
 async function geolocateAt(fullX, fullY) {
@@ -311,8 +335,9 @@ canvas.addEventListener("click", (ev) => {
   if (!state.img) return;
   const rect = canvas.getBoundingClientRect();
   // CSS pixels -> canvas pixels -> full-res calibration pixels.
-  const cx = (ev.clientX - rect.left) * (canvas.width / rect.width);
-  const cy = (ev.clientY - rect.top) * (canvas.height / rect.height);
+  let cx = (ev.clientX - rect.left) * (canvas.width / rect.width);
+  let cy = (ev.clientY - rect.top) * (canvas.height / rect.height);
+  [cx, cy] = unrotateCanvasPoint(cx, cy); // undo any north-up rotation
   const fullX = cx * (state.full.w / canvas.width);
   const fullY = cy * (state.full.h / canvas.height);
 
@@ -341,6 +366,7 @@ $("copy").addEventListener("click", () => {
   if (state.copyLatLon) navigator.clipboard.writeText(state.copyLatLon.join(","));
 });
 
+$("northup").addEventListener("change", drawCanvas);
 $("aircraft-toggle").addEventListener("change", loadTracks);
 let tlenDebounce = null;
 $("tlen").addEventListener("input", () => {

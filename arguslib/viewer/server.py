@@ -36,6 +36,24 @@ def _parse_dt(raw: str) -> dt.datetime:
         abort(400, f"Invalid datetime: {raw!r}")
 
 
+def north_up_angle(cam) -> float:
+    """Degrees to rotate the canvas clockwise to bring geographic north to the
+    top, from where a due-north point projects relative to the image centre.
+    Handedness-proof (uses the actual projection); 0.0 if it can't be computed.
+    """
+    import numpy as np
+
+    try:
+        w, h = float(cam.image_size_px[0]), float(cam.image_size_px[1])
+        north = cam.position.ead_to_lla(45.0, 0.0, 10.0)  # a point due north
+        px = np.asarray(cam.target_pix(north)).ravel()
+        dx, dy = px[0] - w / 2.0, px[1] - h / 2.0
+        ang = np.degrees(np.arctan2(dx, -dy))  # north's screen angle, CW from up
+        return round(-float(ang), 2)  # rotate content by -ang to bring N to top
+    except Exception:
+        return 0.0
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     registry = InstrumentRegistry()
@@ -80,8 +98,9 @@ def create_app() -> Flask:
         resp.headers["X-Timestamp"] = meta["timestamp"]
         resp.headers["X-Full-Width"] = str(meta["full_width"])
         resp.headers["X-Full-Height"] = str(meta["full_height"])
+        resp.headers["X-North-Up-Deg"] = str(north_up_angle(registry.get(instrument_id)))
         resp.headers["Access-Control-Expose-Headers"] = (
-            "X-Timestamp, X-Full-Width, X-Full-Height"
+            "X-Timestamp, X-Full-Width, X-Full-Height, X-North-Up-Deg"
         )
         return resp
 
