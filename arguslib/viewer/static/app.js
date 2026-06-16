@@ -407,6 +407,19 @@ $("copy").addEventListener("click", () => {
   if (state.copyLatLon) navigator.clipboard.writeText(state.copyLatLon.join(","));
 });
 
+// Jump buttons: nudge the time slider by ±N seconds (clamped to the day's
+// bounds) and load the frame.
+document.querySelectorAll(".jump").forEach((b) =>
+  b.addEventListener("click", () => {
+    const slider = $("time");
+    const min = parseInt(slider.min, 10), max = parseInt(slider.max, 10);
+    const v = parseInt(slider.value, 10) + parseInt(b.dataset.jump, 10);
+    slider.value = Math.min(Math.max(v, min), max);
+    currentDatetime();
+    scheduleFrame(0);
+  })
+);
+
 $("northup").addEventListener("change", drawCanvas);
 $("aircraft-toggle").addEventListener("change", loadTracks);
 let tlenDebounce = null;

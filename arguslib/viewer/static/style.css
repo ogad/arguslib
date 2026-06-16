@@ -74,6 +74,15 @@ main {
 .warn { color: #e0a458; min-height: 1.2rem; }
 .controls label.check { display: flex; align-items: center; gap: 0.4rem; }
 .controls label.check input { width: auto; margin: 0; }
+.jumps { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-bottom: 1rem; }
+.jumps button {
+  flex: 1 1 2.4rem;
+  margin: 0;
+  padding: 0.25rem 0;
+  background: #2a2f3a;
+  font-size: 0.8rem;
+}
+.jumps button:hover { background: #353c4a; }
 .viewport {
   background: #0c0e12;
   border: 1px solid #2a2f3a;
