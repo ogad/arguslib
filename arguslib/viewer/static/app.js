@@ -174,13 +174,10 @@ $("copy").addEventListener("click", () => {
 $("instrument").addEventListener("change", () => scheduleFrame(0));
 $("date").addEventListener("change", () => scheduleFrame(0));
 
-// Calendar button: open the hidden native date picker, seeded from the text
-// field. Its value is ISO (YYYY-MM-DD), so syncing it back keeps the format.
-$("date-pick").addEventListener("click", () => {
-  const native = $("date-native");
-  if (/^\d{4}-\d{2}-\d{2}$/.test($("date").value)) native.value = $("date").value;
-  if (native.showPicker) native.showPicker();
-  else native.focus(); // fallback for browsers without showPicker()
+// Keep the overlaid native picker seeded from whatever is typed, and sync the
+// chosen ISO value back to the text field (preserving the YYYY-MM-DD format).
+$("date").addEventListener("input", () => {
+  if (/^\d{4}-\d{2}-\d{2}$/.test($("date").value)) $("date-native").value = $("date").value;
 });
 $("date-native").addEventListener("change", () => {
   const v = $("date-native").value;
