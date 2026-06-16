@@ -22,7 +22,6 @@ import numpy as np
 WIND_MODE = "aircraft"
 WIND_FILTER = 10
 MAX_RANGE_KM = 90
-_MISSING = -9999999  # Fleet's jsonfloat sentinel for NaN
 
 
 class TrackService:
@@ -141,13 +140,11 @@ class TrackService:
 
     @staticmethod
     def _info(fleet, icao, when):
-        try:
-            data = fleet.aircraft[icao].get_current(when)
-        except Exception:
-            return {"icao": icao}
+        """Aircraft identity only. Per-point position/age live on the waypoints;
+        instantaneous current-state fields would be misleading on a clicked
+        (past, advected) trail point, so they're not reported."""
         info = {"icao": icao}
-        for k, v in data.items():
-            if isinstance(v, float) and (v == _MISSING or not np.isfinite(v)):
-                continue
-            info[k] = v
+        atype = getattr(fleet.aircraft.get(icao), "atype", None)
+        if atype and atype != "None":
+            info["atype"] = atype
         return info

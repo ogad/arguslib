@@ -290,12 +290,8 @@ function hitTestTracks(fx, fy, threshold) {
   return best ? { ac: best, ...hit } : null;
 }
 
-const FT_TO_KM = 0.0003048;
-const KT_TO_KMH = 1.852;
-
-// Clicked trail point -> shared readout: lon/lat/alt are the *clicked* waypoint
-// (km / degrees), plus the aircraft's identity and current state. `geo` and
-// `age` describe the clicked point; each waypoint differs.
+// Clicked trail point -> shared readout. Everything here describes the clicked
+// point: lon/lat/alt (km / degrees) and age, plus the aircraft's identity.
 function showAircraft(ac, age, geo) {
   const i = ac.info || {};
   state.copyLatLon = geo ? [geo.lon, geo.lat] : null;
@@ -307,9 +303,6 @@ function showAircraft(ac, age, geo) {
     rows.push(rowHtml("alt", geo.alt.toFixed(2) + " km"));
   }
   if (age != null) rows.push(rowHtml("age here", (age / 60).toFixed(1) + " min"));
-  if (i.gs != null) rows.push(rowHtml("g/s", (i.gs * KT_TO_KMH).toFixed(0) + " km/h"));
-  if (i.track != null) rows.push(rowHtml("track", i.track.toFixed(0) + "°"));
-  if (i.oat != null) rows.push(rowHtml("OAT", i.oat.toFixed(1) + " °C"));
   setReadout(rows);
   $("warn").textContent = "";
 }
