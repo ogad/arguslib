@@ -114,6 +114,14 @@ function clearImage() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
+// Opacity for a waypoint of the given age (s): solid at the aircraft, fading
+// with age but never below AGE_MIN_ALPHA so old trail stays visible.
+const AGE_MIN_ALPHA = 0.3;
+function alphaForAge(age, maxAge) {
+  const a = 1 - (Math.min(age, maxAge) / maxAge) * (1 - AGE_MIN_ALPHA);
+  return Math.max(AGE_MIN_ALPHA, a);
+}
+
 // Aircraft tracks are stored in full-res pixels; scale them to canvas pixels.
 function drawTracks() {
   if (!state.tracks.length) return;
@@ -122,21 +130,26 @@ function drawTracks() {
   // The canvas is drawn at the (downscaled) image resolution then shrunk by CSS,
   // so scale line widths to canvas px per display px to get the intended weight.
   const dpx = canvas.clientWidth ? canvas.width / canvas.clientWidth : 1;
+  const maxAge = (parseInt($("tlen").value, 10) || 30) * 60; // age fade reference
   for (const ac of state.tracks) {
     const selected = ac.icao === state.selectedIcao;
     const color = "#" + ac.icao; // ICAO24 hex doubles as a stable colour
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.lineWidth = (selected ? 3.5 : 2) * dpx;
-    ctx.globalAlpha = selected ? 1 : 0.85;
+    // Stroke each sub-segment with its own age-based alpha so the trail fades
+    // toward its older end.
     for (const seg of ac.segments) {
-      ctx.beginPath();
-      seg.forEach((p, i) => {
-        const x = p[0] * sx, y = p[1] * sy;
-        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-      });
-      ctx.stroke();
+      for (let i = 0; i < seg.length - 1; i++) {
+        const a = seg[i], b = seg[i + 1];
+        ctx.globalAlpha = alphaForAge((a[2] + b[2]) / 2, maxAge);
+        ctx.beginPath();
+        ctx.moveTo(a[0] * sx, a[1] * sy);
+        ctx.lineTo(b[0] * sx, b[1] * sy);
+        ctx.stroke();
+      }
     }
+    ctx.globalAlpha = 1; // current position is freshest -> full opacity
     if (ac.current) {
       ctx.beginPath();
       ctx.arc(ac.current[0] * sx, ac.current[1] * sy, (selected ? 6 : 4) * dpx, 0, 2 * Math.PI);
@@ -234,31 +247,34 @@ async function loadTracks() {
   }
 }
 
-function distToSegment(px, py, ax, ay, bx, by) {
+// Distance from (px,py) to segment a-b, plus the clamped projection fraction t.
+function segDistT(px, py, ax, ay, bx, by) {
   const dx = bx - ax, dy = by - ay;
   const len2 = dx * dx + dy * dy;
   let t = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
   t = Math.max(0, Math.min(1, t));
-  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  return { dist: Math.hypot(px - (ax + t * dx), py - (ay + t * dy)), t };
 }
 
-// Nearest aircraft whose track passes within `threshold` full-res px of (fx,fy).
+// Nearest aircraft whose track passes within `threshold` full-res px of (fx,fy),
+// with the interpolated trail age (s) at the closest point. Null if no hit.
 function hitTestTracks(fx, fy, threshold) {
-  let best = null, bestD = threshold;
+  let best = null, bestD = threshold, bestAge = null;
   for (const ac of state.tracks) {
     for (const seg of ac.segments) {
       if (seg.length === 1) {
         const d = Math.hypot(fx - seg[0][0], fy - seg[0][1]);
-        if (d < bestD) { bestD = d; best = ac; }
+        if (d < bestD) { bestD = d; best = ac; bestAge = seg[0][2]; }
         continue;
       }
       for (let i = 0; i < seg.length - 1; i++) {
-        const d = distToSegment(fx, fy, seg[i][0], seg[i][1], seg[i + 1][0], seg[i + 1][1]);
-        if (d < bestD) { bestD = d; best = ac; }
+        const a = seg[i], b = seg[i + 1];
+        const { dist, t } = segDistT(fx, fy, a[0], a[1], b[0], b[1]);
+        if (dist < bestD) { bestD = dist; best = ac; bestAge = a[2] + (b[2] - a[2]) * t; }
       }
     }
   }
-  return best;
+  return best ? { ac: best, age: bestAge } : null;
 }
 
 const FT_TO_KM = 0.0003048;
@@ -266,7 +282,7 @@ const KT_TO_KMH = 1.852;
 
 // Aircraft selection -> shared readout, including its (ADS-B) position. Units
 // in km / km·h⁻¹ to match the point-geolocation readout.
-function showAircraft(ac) {
+function showAircraft(ac, age) {
   const i = ac.info || {};
   state.copyLatLon = (i.lon != null && i.lat != null) ? [i.lon, i.lat] : null;
   const rows = [rowHtml("icao", ac.icao)];
@@ -277,6 +293,8 @@ function showAircraft(ac) {
   if (i.gs != null) rows.push(rowHtml("g/s", (i.gs * KT_TO_KMH).toFixed(0) + " km/h"));
   if (i.track != null) rows.push(rowHtml("track", i.track.toFixed(0) + "°"));
   if (i.oat != null) rows.push(rowHtml("OAT", i.oat.toFixed(1) + " °C"));
+  // Age of the clicked point on the trail (each waypoint differs in age).
+  if (age != null) rows.push(rowHtml("age here", (age / 60).toFixed(1) + " min"));
   setReadout(rows);
   $("warn").textContent = "";
 }
@@ -292,11 +310,11 @@ canvas.addEventListener("click", (ev) => {
 
   // Prefer a flight-track hit (threshold ~8 CSS px in full-res units).
   if (state.tracks.length) {
-    const ac = hitTestTracks(fullX, fullY, 8 * (state.full.w / rect.width));
-    if (ac) {
-      state.selectedIcao = ac.icao;
+    const hit = hitTestTracks(fullX, fullY, 8 * (state.full.w / rect.width));
+    if (hit) {
+      state.selectedIcao = hit.ac.icao;
       state.marker = null;
-      showAircraft(ac);
+      showAircraft(hit.ac, hit.age);
       drawCanvas();
       return;
     }

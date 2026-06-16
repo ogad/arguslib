@@ -64,8 +64,8 @@ class TrackService:
             fleet = ai.fleet
 
             out = []
-            for icao, (positions, _ages) in trails.items():
-                segments, current = self._project(cam, positions)
+            for icao, (positions, ages) in trails.items():
+                segments, current = self._project(cam, positions, ages)
                 if not segments:
                     continue
                 out.append(
@@ -91,14 +91,20 @@ class TrackService:
         return self._ai
 
     @staticmethod
-    def _project(cam, positions):
+    def _project(cam, positions, ages):
         """Project trail Positions to full-res pixels, returning contiguous
-        visible polyline segments and the current-position pixel (if visible)."""
+        visible polyline segments and the current-position pixel (if visible).
+
+        Each point is ``[x, y, age_s]`` where ``age_s`` is seconds since the
+        aircraft passed that point (0 at the current position), so the client
+        can fade the trail by age and report the age at a clicked point.
+        """
         ieads = cam.target_iead(positions)  # (N,3): elev-from-axis, azim, dist
         if ieads.ndim == 1:
             ieads = ieads.reshape(1, -1)
         pix = cam.iead_to_pix(ieads[:, 0], ieads[:, 1], ieads[:, 2])  # (N,2)
         pix = np.atleast_2d(pix)
+        ages = np.asarray(ages)
 
         visible = (
             np.isfinite(pix[:, 0])
@@ -112,14 +118,20 @@ class TrackService:
         segments, run = [], []
         for i, vis in enumerate(visible):
             if vis:
-                run.append([round(float(pix[i, 0]), 1), round(float(pix[i, 1]), 1)])
+                run.append(
+                    [
+                        round(float(pix[i, 0]), 1),
+                        round(float(pix[i, 1]), 1),
+                        int(round(abs(float(ages[i])))),
+                    ]
+                )
             elif run:
                 segments.append(run)
                 run = []
         if run:
             segments.append(run)
 
-        current = segments[-1][-1] if (len(visible) and visible[-1]) else None
+        current = segments[-1][-1][:2] if (len(visible) and visible[-1]) else None
         return segments, current
 
     @staticmethod
