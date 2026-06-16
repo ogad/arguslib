@@ -15,6 +15,9 @@ const state = {
   selectedIcao: null,
   copyLatLon: null, // [lon, lat] backing the Copy button
   northUpDeg: 0, // canvas rotation (deg, CW) to put north at the top
+  // Persisted selection (world position), re-projected across camera/image
+  // changes: {kind:'point'|'flight', lon, lat, alt, icao?, type?, age?}.
+  persist: null,
 };
 
 function setStatus(msg) { $("status").textContent = msg || ""; }
@@ -85,11 +88,13 @@ async function loadFrame() {
     const bitmap = await createImageBitmap(blob);
     if (token !== frameToken) return;
     state.img = bitmap;
-    state.marker = null;
     state.frameTs = ts;
+    if (!state.persist) state.marker = null;
+    state.tracks = []; // clear stale trails immediately on a new image
     drawCanvas();
     setStatus(`frame @ ${ts} UTC`);
-    loadTracks(); // overlay aircraft for this frame's true timestamp, if enabled
+    reprojectPersist(); // re-place the persisted point/flight on the new view
+    loadTracks(); // fresh trails for this frame's true timestamp, if enabled
   } catch (err) {
     if (err.name === "AbortError") return; // superseded; not an error
     setStatus(`error: ${err}`);
@@ -103,6 +108,8 @@ const setReadout = (rows) => { $("readout").innerHTML = rows.length ? `<table>${
 function clearReadout() {
   state.marker = null;
   state.copyLatLon = null;
+  state.persist = null;
+  state.selectedIcao = null;
   setReadout([]);
   $("warn").textContent = "";
   drawCanvas();
@@ -219,23 +226,27 @@ async function geolocateAt(fullX, fullY) {
     return;
   }
   showFix(r);
+  state.persist = { kind: "point", lon: r.lon, lat: r.lat, alt: r.alt_km };
   setStatus("");
 }
 
-// Point geolocation result -> shared readout (units in km / degrees).
+// Point fix -> shared readout (units in km / degrees). Works for both the
+// geolocate result and the project result (which omits back-proj error).
 function showFix(r) {
   state.copyLatLon = [r.lon, r.lat];
-  setReadout([
+  const rows = [
     rowHtml("lon", r.lon.toFixed(5)),
     rowHtml("lat", r.lat.toFixed(5)),
     rowHtml("alt", r.alt_km.toFixed(2) + " km"),
     rowHtml("elev", r.elevation_deg.toFixed(2) + "°"),
     rowHtml("azim", r.azimuth_deg.toFixed(2) + "°"),
     rowHtml("range", r.distance_km.toFixed(2) + " km"),
-    rowHtml("back-proj err", r.pixel_error.toFixed(2) + " px"),
-  ]);
-  $("warn").textContent = r.calibration_frame_ok ? "" :
-    "⚠ this camera applies image flips/rotations; click mapping is not yet corrected for it.";
+  ];
+  if (r.pixel_error != null) rows.push(rowHtml("back-proj err", r.pixel_error.toFixed(2) + " px"));
+  setReadout(rows);
+  $("warn").textContent = r.calibration_frame_ok === false
+    ? "⚠ this camera applies image flips/rotations; click mapping is not yet corrected for it."
+    : "";
 }
 
 const aircraftEnabled = () => $("aircraft-toggle").checked;
@@ -331,6 +342,32 @@ function showAircraft(ac, age, geo) {
   $("warn").textContent = "";
 }
 
+// Re-place the persisted selection on the current camera/image: project its
+// world position to a pixel for the marker, and rebuild the readout. Keeps the
+// geolocation (point or flight) across camera/image changes.
+async function reprojectPersist() {
+  const p = state.persist;
+  if (!p) return;
+  const id = $("instrument").value;
+  try {
+    const resp = await fetch(
+      `/api/project?id=${encodeURIComponent(id)}&lon=${p.lon}&lat=${p.lat}&alt=${p.alt}`
+    );
+    const j = await resp.json();
+    if (!j.ok) return;
+    state.marker = j.in_view ? { x: j.px, y: j.py } : null;
+    if (p.kind === "flight") {
+      state.selectedIcao = p.icao;
+      showAircraft({ icao: p.icao, info: { atype: p.type } }, p.age,
+        { lon: p.lon, lat: p.lat, alt: p.alt });
+    } else {
+      state.selectedIcao = null;
+      showFix(j); // recomputes elev/azim/range for the new camera
+    }
+    drawCanvas();
+  } catch { /* leave the existing readout */ }
+}
+
 canvas.addEventListener("click", (ev) => {
   if (!state.img) return;
   const rect = canvas.getBoundingClientRect();
@@ -349,6 +386,10 @@ canvas.addEventListener("click", (ev) => {
       // Snap the geolocation marker to the clicked point on the track; drawn
       // after the tracks, so it sits on top.
       state.marker = { x: hit.point[0], y: hit.point[1] };
+      state.persist = {
+        kind: "flight", icao: hit.ac.icao, type: (hit.ac.info || {}).atype,
+        lon: hit.geo.lon, lat: hit.geo.lat, alt: hit.geo.alt, age: hit.age,
+      };
       showAircraft(hit.ac, hit.age, hit.geo);
       drawCanvas();
       return;

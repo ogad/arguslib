@@ -115,6 +115,44 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "error": str(exc), "aircraft": []}), 404
         return jsonify({"ok": True, "aircraft": aircraft})
 
+    @app.route("/api/project")
+    def project():
+        """Project a world position (lon/lat/alt) onto the current camera, so a
+        persisted point/flight can be re-placed after a camera/image change."""
+        import numpy as np
+        from ..instruments import Position
+
+        cam = registry.get(request.args.get("id"))
+        pos = Position(
+            float(request.args["lon"]),
+            float(request.args["lat"]),
+            float(request.args["alt"]),
+        )
+        elev, azim, dist = (float(v) for v in cam.target_iead(pos))
+        px, py = (float(v) for v in np.asarray(cam.target_pix(pos)).ravel()[:2])
+        w, h = float(cam.image_size_px[0]), float(cam.image_size_px[1])
+        in_view = (
+            elev <= 90
+            and np.isfinite(px)
+            and np.isfinite(py)
+            and 0 <= px <= w
+            and 0 <= py <= h
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "lon": pos.lon,
+                "lat": pos.lat,
+                "alt_km": pos.alt,
+                "elevation_deg": elev,
+                "azimuth_deg": azim % 360.0,
+                "distance_km": dist,
+                "px": px,
+                "py": py,
+                "in_view": bool(in_view),
+            }
+        )
+
     @app.route("/api/geolocate", methods=["POST"])
     def geolocate():
         body = request.get_json(force=True)
