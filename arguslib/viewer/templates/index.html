@@ -18,12 +18,14 @@
         <select id="instrument"></select>
       </label>
 
-      <label>Date (UTC)
-        <input type="date" id="date" />
+      <label>Date (UTC, YYYY-MM-DD)
+        <input type="text" id="date" inputmode="numeric"
+               pattern="\d{4}-\d{2}-\d{2}" placeholder="YYYY-MM-DD" maxlength="10" />
       </label>
 
       <label>Time <span id="time-readout" class="mono"></span>
-        <input type="range" id="time" min="0" max="86395" step="5" value="43200" />
+        <!-- min=1/step=5 keeps 5s arrow steps while letting the default land on :06 -->
+        <input type="range" id="time" min="1" max="86396" step="5" value="26706" />
       </label>
 
       <label>Assumed feature altitude: <span id="alt-readout" class="mono">10.0 km</span>

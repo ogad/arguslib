@@ -62,7 +62,9 @@ def create_app() -> Flask:
         try:
             jpeg, meta = frames.get_jpeg(instrument_id, when, max_dim=max_dim)
         except FileNotFoundError as exc:
-            abort(404, str(exc))
+            # JSON (not Flask's HTML error page) so the client can show a clean
+            # message instead of dumping raw markup into the status bar.
+            return jsonify({"ok": False, "error": str(exc)}), 404
         resp = send_file(io.BytesIO(jpeg), mimetype="image/jpeg")
         resp.headers["X-Timestamp"] = meta["timestamp"]
         resp.headers["X-Full-Width"] = str(meta["full_width"])

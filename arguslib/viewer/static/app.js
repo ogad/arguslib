@@ -51,7 +51,7 @@ let frameToken = 0;
 async function loadFrame() {
   const id = $("instrument").value;
   const t = currentDatetime();
-  if (!id || !$("date").value) return;
+  if (!id || !/^\d{4}-\d{2}-\d{2}$/.test($("date").value)) return;
 
   if (frameAbort) frameAbort.abort();
   frameAbort = new AbortController();
@@ -64,7 +64,12 @@ async function loadFrame() {
     );
     if (token !== frameToken) return; // a newer request superseded us
     if (!resp.ok) {
-      setStatus(`no frame: ${await resp.text()}`);
+      // There's no frame here, so drop the stale image and fix rather than
+      // leaving something clickable that would geolocate on the wrong frame.
+      const body = await resp.json().catch(() => ({}));
+      clearImage();
+      clearFix();
+      setStatus(body.error || `no frame (HTTP ${resp.status})`);
       return;
     }
     state.full.w = parseInt(resp.headers.get("X-Full-Width"), 10);
@@ -83,8 +88,24 @@ async function loadFrame() {
   }
 }
 
+const READOUT_CELLS = ["r-lon", "r-lat", "r-alt", "r-elev", "r-azim", "r-range", "r-err"];
+
+// Clear the geolocated point: marker, readout cells and any warning.
+function clearFix() {
+  state.marker = null;
+  for (const id of READOUT_CELLS) $(id).textContent = "—";
+  $("warn").textContent = "";
+  drawCanvas();
+}
+
+// Drop the current frame and blank the canvas.
+function clearImage() {
+  state.img = null;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
 function drawCanvas() {
-  if (!state.img) return;
+  if (!state.img) { ctx.clearRect(0, 0, canvas.width, canvas.height); return; }
   canvas.width = state.img.width;
   canvas.height = state.img.height;
   ctx.drawImage(state.img, 0, 0);
@@ -111,11 +132,13 @@ async function geolocateAt(fullX, fullY) {
     body: JSON.stringify({ id, px: fullX, py: fullY, altitude_km }),
   });
   const r = await resp.json();
-  $("warn").textContent = "";
   if (!r.ok) {
+    // e.g. a ray that never reaches the assumed altitude: clear the point.
+    clearFix();
     setStatus(r.reason || "geolocation failed");
     return;
   }
+  $("warn").textContent = "";
   $("r-lon").textContent = r.lon.toFixed(5);
   $("r-lat").textContent = r.lat.toFixed(5);
   $("r-alt").textContent = r.alt_km.toFixed(2) + " km";
@@ -157,9 +180,14 @@ $("altitude").addEventListener("input", () => {
   if (state.marker) geolocateAt(state.marker.x, state.marker.y);
 });
 
+const DEFAULTS = { instrument: "COBALT:3-7", date: "2025-05-01" }; // time set in HTML
+
 (async function init() {
   await loadInstruments();
-  $("date").value = new Date().toISOString().slice(0, 10);
+  if ([...$("instrument").options].some((o) => o.value === DEFAULTS.instrument)) {
+    $("instrument").value = DEFAULTS.instrument;
+  }
+  $("date").value = DEFAULTS.date;
   currentDatetime();
   loadFrame();
 })();
