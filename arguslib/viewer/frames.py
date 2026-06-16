@@ -13,7 +13,7 @@ from __future__ import annotations
 import datetime as dt
 from collections import OrderedDict
 from threading import Lock
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 
 def _round_to_resolution(when: dt.datetime, resolution_s: int = 5) -> dt.datetime:
@@ -30,6 +30,20 @@ class FrameService:
         self.max_cache = max_cache
         self._cache: "OrderedDict[tuple, Tuple[bytes, dict]]" = OrderedDict()
         self._lock = Lock()
+        # cv2.VideoCapture is not thread-safe and each instrument shares one
+        # capture (cached in CameraData), so concurrent decodes of the same
+        # camera corrupt the FFmpeg decoder. Serialize decodes per instrument;
+        # different instruments may still decode in parallel.
+        self._decode_locks: Dict[str, Lock] = {}
+        self._decode_locks_guard = Lock()
+
+    def _decode_lock(self, instrument_id: str) -> Lock:
+        with self._decode_locks_guard:
+            lock = self._decode_locks.get(instrument_id)
+            if lock is None:
+                lock = Lock()
+                self._decode_locks[instrument_id] = lock
+            return lock
 
     def get_jpeg(
         self,
@@ -45,20 +59,33 @@ class FrameService:
         timestamp. Raises ``FileNotFoundError`` if no frame is available.
         """
         key = (instrument_id, _round_to_resolution(when), max_dim, quality)
+        hit = self._cache_get(key)
+        if hit is not None:
+            return hit
+
+        # Serialize decodes for this camera. Re-check the cache after acquiring
+        # the lock: a request that was queued behind a decode of the same frame
+        # should reuse the result instead of decoding again.
+        with self._decode_lock(instrument_id):
+            hit = self._cache_get(key)
+            if hit is not None:
+                return hit
+
+            jpeg, meta = self._render(instrument_id, when, max_dim, quality)
+
+            with self._lock:
+                self._cache[key] = (jpeg, meta)
+                self._cache.move_to_end(key)
+                while len(self._cache) > self.max_cache:
+                    self._cache.popitem(last=False)
+            return jpeg, meta
+
+    def _cache_get(self, key):
         with self._lock:
             hit = self._cache.get(key)
             if hit is not None:
                 self._cache.move_to_end(key)
-                return hit
-
-        jpeg, meta = self._render(instrument_id, when, max_dim, quality)
-
-        with self._lock:
-            self._cache[key] = (jpeg, meta)
-            self._cache.move_to_end(key)
-            while len(self._cache) > self.max_cache:
-                self._cache.popitem(last=False)
-        return jpeg, meta
+            return hit
 
     def _render(self, instrument_id, when, max_dim, quality):
         import cv2

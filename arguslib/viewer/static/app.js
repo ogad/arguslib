@@ -37,16 +37,31 @@ function currentDatetime() {
   return `${date}T${hh}:${mm}:${ss}`;
 }
 
+// Debounce rapid scrubbing (e.g. holding an arrow key) into one request once
+// the time settles, and abort any in-flight frame request that a newer one
+// supersedes — so the server never has a backlog of stale decodes to chew on.
+let frameDebounce = null;
+let frameAbort = null;
+function scheduleFrame(delay = 120) {
+  clearTimeout(frameDebounce);
+  frameDebounce = setTimeout(loadFrame, delay);
+}
+
 let frameToken = 0;
 async function loadFrame() {
   const id = $("instrument").value;
   const t = currentDatetime();
   if (!id || !$("date").value) return;
 
+  if (frameAbort) frameAbort.abort();
+  frameAbort = new AbortController();
   const token = ++frameToken;
   setStatus("loading frame…");
   try {
-    const resp = await fetch(`/api/frame?id=${encodeURIComponent(id)}&t=${encodeURIComponent(t)}`);
+    const resp = await fetch(
+      `/api/frame?id=${encodeURIComponent(id)}&t=${encodeURIComponent(t)}`,
+      { signal: frameAbort.signal }
+    );
     if (token !== frameToken) return; // a newer request superseded us
     if (!resp.ok) {
       setStatus(`no frame: ${await resp.text()}`);
@@ -63,6 +78,7 @@ async function loadFrame() {
     drawCanvas();
     setStatus(`frame @ ${ts} UTC`);
   } catch (err) {
+    if (err.name === "AbortError") return; // superseded; not an error
     setStatus(`error: ${err}`);
   }
 }
@@ -132,10 +148,9 @@ $("copy").addEventListener("click", () => {
   if (lon !== "—") navigator.clipboard.writeText(`${lon},${lat}`);
 });
 
-$("instrument").addEventListener("change", loadFrame);
-$("date").addEventListener("change", loadFrame);
-$("time").addEventListener("input", currentDatetime);
-$("time").addEventListener("change", loadFrame);
+$("instrument").addEventListener("change", () => scheduleFrame(0));
+$("date").addEventListener("change", () => scheduleFrame(0));
+$("time").addEventListener("input", () => { currentDatetime(); scheduleFrame(); });
 $("altitude").addEventListener("input", () => {
   $("alt-readout").textContent = parseFloat($("altitude").value).toFixed(1) + " km";
   // Re-geolocate the existing marker at the new altitude (no file read).
