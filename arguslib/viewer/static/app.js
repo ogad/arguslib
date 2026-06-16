@@ -256,45 +256,60 @@ function segDistT(px, py, ax, ay, bx, by) {
   return { dist: Math.hypot(px - (ax + t * dx), py - (ay + t * dy)), t };
 }
 
-// Nearest aircraft whose track passes within `threshold` full-res px of (fx,fy),
-// with the interpolated trail age (s) at the closest point. Null if no hit.
+// Nearest aircraft whose track passes within `threshold` full-res px of (fx,fy).
+// Returns the closest point on the track (full-res px) plus the interpolated
+// age (s) and geographic position there. Null if no hit.
+const lerp = (a, b, t) => a + (b - a) * t;
 function hitTestTracks(fx, fy, threshold) {
-  let best = null, bestD = threshold, bestAge = null;
+  let best = null, bestD = threshold, hit = null;
   for (const ac of state.tracks) {
     for (const seg of ac.segments) {
       if (seg.length === 1) {
-        const d = Math.hypot(fx - seg[0][0], fy - seg[0][1]);
-        if (d < bestD) { bestD = d; best = ac; bestAge = seg[0][2]; }
+        const p = seg[0];
+        const d = Math.hypot(fx - p[0], fy - p[1]);
+        if (d < bestD) {
+          bestD = d; best = ac;
+          hit = { point: [p[0], p[1]], age: p[2], geo: { lon: p[3], lat: p[4], alt: p[5] } };
+        }
         continue;
       }
       for (let i = 0; i < seg.length - 1; i++) {
         const a = seg[i], b = seg[i + 1];
         const { dist, t } = segDistT(fx, fy, a[0], a[1], b[0], b[1]);
-        if (dist < bestD) { bestD = dist; best = ac; bestAge = a[2] + (b[2] - a[2]) * t; }
+        if (dist < bestD) {
+          bestD = dist; best = ac;
+          hit = {
+            point: [lerp(a[0], b[0], t), lerp(a[1], b[1], t)],
+            age: lerp(a[2], b[2], t),
+            geo: { lon: lerp(a[3], b[3], t), lat: lerp(a[4], b[4], t), alt: lerp(a[5], b[5], t) },
+          };
+        }
       }
     }
   }
-  return best ? { ac: best, age: bestAge } : null;
+  return best ? { ac: best, ...hit } : null;
 }
 
 const FT_TO_KM = 0.0003048;
 const KT_TO_KMH = 1.852;
 
-// Aircraft selection -> shared readout, including its (ADS-B) position. Units
-// in km / km·h⁻¹ to match the point-geolocation readout.
-function showAircraft(ac, age) {
+// Clicked trail point -> shared readout: lon/lat/alt are the *clicked* waypoint
+// (km / degrees), plus the aircraft's identity and current state. `geo` and
+// `age` describe the clicked point; each waypoint differs.
+function showAircraft(ac, age, geo) {
   const i = ac.info || {};
-  state.copyLatLon = (i.lon != null && i.lat != null) ? [i.lon, i.lat] : null;
+  state.copyLatLon = geo ? [geo.lon, geo.lat] : null;
   const rows = [rowHtml("icao", ac.icao)];
   if (i.atype) rows.push(rowHtml("type", i.atype));
-  if (i.lon != null) rows.push(rowHtml("lon", i.lon.toFixed(5)));
-  if (i.lat != null) rows.push(rowHtml("lat", i.lat.toFixed(5)));
-  if (i.alt_geom != null) rows.push(rowHtml("alt", (i.alt_geom * FT_TO_KM).toFixed(2) + " km"));
+  if (geo) {
+    rows.push(rowHtml("lon", geo.lon.toFixed(5)));
+    rows.push(rowHtml("lat", geo.lat.toFixed(5)));
+    rows.push(rowHtml("alt", geo.alt.toFixed(2) + " km"));
+  }
+  if (age != null) rows.push(rowHtml("age here", (age / 60).toFixed(1) + " min"));
   if (i.gs != null) rows.push(rowHtml("g/s", (i.gs * KT_TO_KMH).toFixed(0) + " km/h"));
   if (i.track != null) rows.push(rowHtml("track", i.track.toFixed(0) + "°"));
   if (i.oat != null) rows.push(rowHtml("OAT", i.oat.toFixed(1) + " °C"));
-  // Age of the clicked point on the trail (each waypoint differs in age).
-  if (age != null) rows.push(rowHtml("age here", (age / 60).toFixed(1) + " min"));
   setReadout(rows);
   $("warn").textContent = "";
 }
@@ -313,8 +328,10 @@ canvas.addEventListener("click", (ev) => {
     const hit = hitTestTracks(fullX, fullY, 8 * (state.full.w / rect.width));
     if (hit) {
       state.selectedIcao = hit.ac.icao;
-      state.marker = null;
-      showAircraft(hit.ac, hit.age);
+      // Snap the geolocation marker to the clicked point on the track; drawn
+      // after the tracks, so it sits on top.
+      state.marker = { x: hit.point[0], y: hit.point[1] };
+      showAircraft(hit.ac, hit.age, hit.geo);
       drawCanvas();
       return;
     }

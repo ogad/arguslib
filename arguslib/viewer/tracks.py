@@ -95,9 +95,10 @@ class TrackService:
         """Project trail Positions to full-res pixels, returning contiguous
         visible polyline segments and the current-position pixel (if visible).
 
-        Each point is ``[x, y, age_s]`` where ``age_s`` is seconds since the
-        aircraft passed that point (0 at the current position), so the client
-        can fade the trail by age and report the age at a clicked point.
+        Each point is ``[x, y, age_s, lon, lat, alt_km]``: ``age_s`` is seconds
+        since the aircraft passed that point (0 at the current position), and
+        lon/lat/alt are that waypoint's geographic position. This lets the
+        client fade by age and report the age + position of a clicked point.
         """
         ieads = cam.target_iead(positions)  # (N,3): elev-from-axis, azim, dist
         if ieads.ndim == 1:
@@ -118,11 +119,15 @@ class TrackService:
         segments, run = [], []
         for i, vis in enumerate(visible):
             if vis:
+                p = positions[i]
                 run.append(
                     [
                         round(float(pix[i, 0]), 1),
                         round(float(pix[i, 1]), 1),
                         int(round(abs(float(ages[i])))),
+                        round(float(p.lon), 5),
+                        round(float(p.lat), 5),
+                        round(float(p.alt), 3),
                     ]
                 )
             elif run:
