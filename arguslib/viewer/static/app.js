@@ -13,6 +13,7 @@ const state = {
   frameTs: null, // true timestamp of the displayed frame
   tracks: [], // aircraft track overlay (full-res pixel polylines)
   selectedIcao: null,
+  copyLatLon: null, // [lon, lat] backing the Copy button
 };
 
 function setStatus(msg) { $("status").textContent = msg || ""; }
@@ -71,7 +72,7 @@ async function loadFrame() {
       // leaving something clickable that would geolocate on the wrong frame.
       const body = await resp.json().catch(() => ({}));
       clearImage();
-      clearFix();
+      clearReadout();
       setStatus(body.error || `no frame (HTTP ${resp.status})`);
       return;
     }
@@ -93,12 +94,14 @@ async function loadFrame() {
   }
 }
 
-const READOUT_CELLS = ["r-lon", "r-lat", "r-alt", "r-elev", "r-azim", "r-range", "r-err"];
+const rowHtml = (k, v) => `<tr><th>${k}</th><td class="mono">${v}</td></tr>`;
+const setReadout = (rows) => { $("readout").innerHTML = rows.length ? `<table>${rows.join("")}</table>` : ""; };
 
-// Clear the geolocated point: marker, readout cells and any warning.
-function clearFix() {
+// Clear the shared readout (point fix or aircraft) and the geolocated marker.
+function clearReadout() {
   state.marker = null;
-  for (const id of READOUT_CELLS) $(id).textContent = "—";
+  state.copyLatLon = null;
+  setReadout([]);
   $("warn").textContent = "";
   drawCanvas();
 }
@@ -113,15 +116,19 @@ function clearImage() {
 
 // Aircraft tracks are stored in full-res pixels; scale them to canvas pixels.
 function drawTracks() {
+  if (!state.tracks.length) return;
   const sx = canvas.width / state.full.w;
   const sy = canvas.height / state.full.h;
+  // The canvas is drawn at the (downscaled) image resolution then shrunk by CSS,
+  // so scale line widths to canvas px per display px to get the intended weight.
+  const dpx = canvas.clientWidth ? canvas.width / canvas.clientWidth : 1;
   for (const ac of state.tracks) {
     const selected = ac.icao === state.selectedIcao;
     const color = "#" + ac.icao; // ICAO24 hex doubles as a stable colour
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
-    ctx.lineWidth = selected ? 3 : 1.5;
-    ctx.globalAlpha = selected ? 1 : 0.8;
+    ctx.lineWidth = (selected ? 3.5 : 2) * dpx;
+    ctx.globalAlpha = selected ? 1 : 0.85;
     for (const seg of ac.segments) {
       ctx.beginPath();
       seg.forEach((p, i) => {
@@ -132,7 +139,7 @@ function drawTracks() {
     }
     if (ac.current) {
       ctx.beginPath();
-      ctx.arc(ac.current[0] * sx, ac.current[1] * sy, selected ? 5 : 3, 0, 2 * Math.PI);
+      ctx.arc(ac.current[0] * sx, ac.current[1] * sy, (selected ? 6 : 4) * dpx, 0, 2 * Math.PI);
       ctx.fill();
     }
   }
@@ -170,23 +177,28 @@ async function geolocateAt(fullX, fullY) {
   const r = await resp.json();
   if (!r.ok) {
     // e.g. a ray that never reaches the assumed altitude: clear the point.
-    clearFix();
+    clearReadout();
     setStatus(r.reason || "geolocation failed");
     return;
   }
-  $("warn").textContent = "";
-  $("r-lon").textContent = r.lon.toFixed(5);
-  $("r-lat").textContent = r.lat.toFixed(5);
-  $("r-alt").textContent = r.alt_km.toFixed(2) + " km";
-  $("r-elev").textContent = r.elevation_deg.toFixed(2) + "°";
-  $("r-azim").textContent = r.azimuth_deg.toFixed(2) + "°";
-  $("r-range").textContent = r.distance_km.toFixed(2) + " km";
-  $("r-err").textContent = r.pixel_error.toFixed(2) + " px";
-  if (!r.calibration_frame_ok) {
-    $("warn").textContent =
-      "⚠ this camera applies image flips/rotations; click mapping is not yet corrected for it.";
-  }
+  showFix(r);
   setStatus("");
+}
+
+// Point geolocation result -> shared readout (units in km / degrees).
+function showFix(r) {
+  state.copyLatLon = [r.lon, r.lat];
+  setReadout([
+    rowHtml("lon", r.lon.toFixed(5)),
+    rowHtml("lat", r.lat.toFixed(5)),
+    rowHtml("alt", r.alt_km.toFixed(2) + " km"),
+    rowHtml("elev", r.elevation_deg.toFixed(2) + "°"),
+    rowHtml("azim", r.azimuth_deg.toFixed(2) + "°"),
+    rowHtml("range", r.distance_km.toFixed(2) + " km"),
+    rowHtml("back-proj err", r.pixel_error.toFixed(2) + " px"),
+  ]);
+  $("warn").textContent = r.calibration_frame_ok ? "" :
+    "⚠ this camera applies image flips/rotations; click mapping is not yet corrected for it.";
 }
 
 const aircraftEnabled = () => $("aircraft-toggle").checked;
@@ -249,22 +261,24 @@ function hitTestTracks(fx, fy, threshold) {
   return best;
 }
 
-const INFO_FIELDS = [
-  ["atype", "type", (v) => v],
-  ["alt_geom", "alt", (v) => v.toFixed(0) + " ft"],
-  ["gs", "g/s", (v) => v.toFixed(0) + " kt"],
-  ["track", "track", (v) => v.toFixed(0) + "°"],
-  ["oat", "OAT", (v) => v.toFixed(1) + " °C"],
-];
+const FT_TO_KM = 0.0003048;
+const KT_TO_KMH = 1.852;
+
+// Aircraft selection -> shared readout, including its (ADS-B) position. Units
+// in km / km·h⁻¹ to match the point-geolocation readout.
 function showAircraft(ac) {
-  const info = ac.info || {};
-  const rows = [`<tr><th>icao</th><td class="mono">${ac.icao}</td></tr>`];
-  for (const [key, label, fmt] of INFO_FIELDS) {
-    const v = info[key];
-    if (v === undefined || v === null || v === "") continue;
-    rows.push(`<tr><th>${label}</th><td class="mono">${typeof v === "number" ? fmt(v) : v}</td></tr>`);
-  }
-  $("aircraft-info").innerHTML = "<h2>Aircraft</h2><table>" + rows.join("") + "</table>";
+  const i = ac.info || {};
+  state.copyLatLon = (i.lon != null && i.lat != null) ? [i.lon, i.lat] : null;
+  const rows = [rowHtml("icao", ac.icao)];
+  if (i.atype) rows.push(rowHtml("type", i.atype));
+  if (i.lon != null) rows.push(rowHtml("lon", i.lon.toFixed(5)));
+  if (i.lat != null) rows.push(rowHtml("lat", i.lat.toFixed(5)));
+  if (i.alt_geom != null) rows.push(rowHtml("alt", (i.alt_geom * FT_TO_KM).toFixed(2) + " km"));
+  if (i.gs != null) rows.push(rowHtml("g/s", (i.gs * KT_TO_KMH).toFixed(0) + " km/h"));
+  if (i.track != null) rows.push(rowHtml("track", i.track.toFixed(0) + "°"));
+  if (i.oat != null) rows.push(rowHtml("OAT", i.oat.toFixed(1) + " °C"));
+  setReadout(rows);
+  $("warn").textContent = "";
 }
 
 canvas.addEventListener("click", (ev) => {
@@ -290,15 +304,13 @@ canvas.addEventListener("click", (ev) => {
 
   // Otherwise geolocate the clicked point.
   state.selectedIcao = null;
-  $("aircraft-info").innerHTML = "";
   state.marker = { x: fullX, y: fullY };
   drawCanvas();
   geolocateAt(fullX, fullY);
 });
 
 $("copy").addEventListener("click", () => {
-  const lon = $("r-lon").textContent, lat = $("r-lat").textContent;
-  if (lon !== "—") navigator.clipboard.writeText(`${lon},${lat}`);
+  if (state.copyLatLon) navigator.clipboard.writeText(state.copyLatLon.join(","));
 });
 
 $("aircraft-toggle").addEventListener("change", loadTracks);

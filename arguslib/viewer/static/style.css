@@ -74,9 +74,6 @@ main {
 .warn { color: #e0a458; min-height: 1.2rem; }
 .controls label.check { display: flex; align-items: center; gap: 0.4rem; }
 .controls label.check input { width: auto; margin: 0; }
-.aircraft-info { margin-top: 0.8rem; }
-.aircraft-info:empty { display: none; }
-.aircraft-info h2 { font-size: 0.95rem; margin: 0 0 0.3rem; }
 .viewport {
   background: #0c0e12;
   border: 1px solid #2a2f3a;

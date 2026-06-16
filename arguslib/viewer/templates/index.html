@@ -56,19 +56,11 @@
     </section>
 
     <section class="readout">
-      <h2>Fix</h2>
-      <table>
-        <tr><th>lon</th><td id="r-lon" class="mono">—</td></tr>
-        <tr><th>lat</th><td id="r-lat" class="mono">—</td></tr>
-        <tr><th>alt</th><td id="r-alt" class="mono">—</td></tr>
-        <tr><th>elev</th><td id="r-elev" class="mono">—</td></tr>
-        <tr><th>azim</th><td id="r-azim" class="mono">—</td></tr>
-        <tr><th>range</th><td id="r-range" class="mono">—</td></tr>
-        <tr><th>back-proj err</th><td id="r-err" class="mono">—</td></tr>
-      </table>
+      <!-- Shared by point geolocation and aircraft selection: only one is shown
+           at a time, built dynamically. -->
+      <div id="readout"></div>
       <button id="copy">Copy lon,lat</button>
       <p id="warn" class="warn"></p>
-      <div id="aircraft-info" class="aircraft-info"></div>
     </section>
   </main>
 

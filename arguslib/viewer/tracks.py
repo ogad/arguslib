@@ -14,6 +14,7 @@ not load ERA5 winds, keeping it fast and dependency-light.
 from __future__ import annotations
 
 import datetime as dt
+from collections import OrderedDict
 from threading import Lock
 
 import numpy as np
@@ -25,10 +26,15 @@ _MISSING = -9999999  # Fleet's jsonfloat sentinel for NaN
 
 
 class TrackService:
-    def __init__(self, registry):
+    def __init__(self, registry, max_cache: int = 256):
         self.registry = registry
         self._ai = None  # shared AircraftInterface (holds the day's Fleet)
         self._lock = Lock()
+        # Per (instrument, frame timestamp, tlen) result cache, so scrubbing back
+        # to a frame -- or toggling the overlay -- is instant. Keyed on the
+        # frame's true timestamp (5s resolution), so it's deterministic.
+        self._cache: "OrderedDict[tuple, list]" = OrderedDict()
+        self.max_cache = max_cache
 
     def tracks(self, instrument_id: str, when: dt.datetime, tlen: int = 1800) -> list:
         """Projected, advected aircraft trails visible from ``instrument_id`` at
@@ -37,11 +43,20 @@ class TrackService:
         Raises ``FileNotFoundError`` if there's no ADS-B data for that day.
         """
         cam = self.registry.get(instrument_id)
+        key = (instrument_id, when.isoformat(), tlen)
         # Serialize: Fleet load/state isn't thread-safe, and this keeps the daily
         # file read from racing concurrent requests.
         with self._lock:
+            hit = self._cache.get(key)
+            if hit is not None:
+                self._cache.move_to_end(key)
+                return hit
+
             ai = self._interface(cam)
             ai.camera = cam  # reuse the shared fleet across instruments
+            # No-op when the day's file is already loaded (Fleet.load_output
+            # early-returns on a matching loaded_file), so same-day frame changes
+            # don't re-read ADS-B; only the advection + projection is recomputed.
             ai.load_flight_data(when, load_era5_winds=False)
             trails = ai.get_trail_positions(
                 when, tlen=tlen, wind_filter=WIND_FILTER, winds=WIND_MODE
@@ -61,6 +76,11 @@ class TrackService:
                         "info": self._info(fleet, icao, when),
                     }
                 )
+
+            self._cache[key] = out
+            self._cache.move_to_end(key)
+            while len(self._cache) > self.max_cache:
+                self._cache.popitem(last=False)
         return out
 
     def _interface(self, cam):
