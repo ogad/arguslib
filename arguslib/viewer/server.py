@@ -26,6 +26,7 @@ from .registry import InstrumentRegistry
 from .frames import FrameService
 from .geolocate import geolocate_pixel
 from .timeindex import day_index
+from .tracks import TrackService
 
 
 def _parse_dt(raw: str) -> dt.datetime:
@@ -39,6 +40,7 @@ def create_app() -> Flask:
     app = Flask(__name__)
     registry = InstrumentRegistry()
     frames = FrameService(registry)
+    track_service = TrackService(registry)
 
     @app.route("/")
     def index():
@@ -82,6 +84,17 @@ def create_app() -> Flask:
             "X-Timestamp, X-Full-Width, X-Full-Height"
         )
         return resp
+
+    @app.route("/api/tracks")
+    def tracks():
+        instrument_id = request.args.get("id")
+        when = _parse_dt(request.args.get("t"))
+        tlen = int(request.args.get("tlen", 1800))
+        try:
+            aircraft = track_service.tracks(instrument_id, when, tlen=tlen)
+        except FileNotFoundError as exc:
+            return jsonify({"ok": False, "error": str(exc), "aircraft": []}), 404
+        return jsonify({"ok": True, "aircraft": aircraft})
 
     @app.route("/api/geolocate", methods=["POST"])
     def geolocate():

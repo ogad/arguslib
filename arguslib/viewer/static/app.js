@@ -10,6 +10,9 @@ const state = {
   img: null,
   full: { w: 0, h: 0 },
   marker: null, // {x, y} in full-res pixels
+  frameTs: null, // true timestamp of the displayed frame
+  tracks: [], // aircraft track overlay (full-res pixel polylines)
+  selectedIcao: null,
 };
 
 function setStatus(msg) { $("status").textContent = msg || ""; }
@@ -80,8 +83,10 @@ async function loadFrame() {
     if (token !== frameToken) return;
     state.img = bitmap;
     state.marker = null;
+    state.frameTs = ts;
     drawCanvas();
     setStatus(`frame @ ${ts} UTC`);
+    loadTracks(); // overlay aircraft for this frame's true timestamp, if enabled
   } catch (err) {
     if (err.name === "AbortError") return; // superseded; not an error
     setStatus(`error: ${err}`);
@@ -101,7 +106,37 @@ function clearFix() {
 // Drop the current frame and blank the canvas.
 function clearImage() {
   state.img = null;
+  state.tracks = [];
+  state.selectedIcao = null;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+// Aircraft tracks are stored in full-res pixels; scale them to canvas pixels.
+function drawTracks() {
+  const sx = canvas.width / state.full.w;
+  const sy = canvas.height / state.full.h;
+  for (const ac of state.tracks) {
+    const selected = ac.icao === state.selectedIcao;
+    const color = "#" + ac.icao; // ICAO24 hex doubles as a stable colour
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = selected ? 3 : 1.5;
+    ctx.globalAlpha = selected ? 1 : 0.8;
+    for (const seg of ac.segments) {
+      ctx.beginPath();
+      seg.forEach((p, i) => {
+        const x = p[0] * sx, y = p[1] * sy;
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      });
+      ctx.stroke();
+    }
+    if (ac.current) {
+      ctx.beginPath();
+      ctx.arc(ac.current[0] * sx, ac.current[1] * sy, selected ? 5 : 3, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawCanvas() {
@@ -109,6 +144,7 @@ function drawCanvas() {
   canvas.width = state.img.width;
   canvas.height = state.img.height;
   ctx.drawImage(state.img, 0, 0);
+  drawTracks();
   if (state.marker) {
     const x = state.marker.x * (canvas.width / state.full.w);
     const y = state.marker.y * (canvas.height / state.full.h);
@@ -153,6 +189,84 @@ async function geolocateAt(fullX, fullY) {
   setStatus("");
 }
 
+const aircraftEnabled = () => $("aircraft-toggle").checked;
+
+// Fetch + overlay advected aircraft tracks for the displayed frame's timestamp.
+let tracksToken = 0;
+async function loadTracks() {
+  if (!aircraftEnabled() || !state.frameTs || !state.img) {
+    state.tracks = [];
+    drawCanvas();
+    return;
+  }
+  const id = $("instrument").value;
+  const tlen = parseInt($("tlen").value, 10) * 60;
+  const token = ++tracksToken;
+  try {
+    const resp = await fetch(
+      `/api/tracks?id=${encodeURIComponent(id)}&t=${encodeURIComponent(state.frameTs)}&tlen=${tlen}`
+    );
+    const j = await resp.json();
+    if (token !== tracksToken) return; // superseded
+    if (!j.ok) {
+      state.tracks = [];
+      drawCanvas();
+      setStatus(j.error || "no aircraft data");
+      return;
+    }
+    state.tracks = j.aircraft || [];
+    drawCanvas();
+    setStatus(`${state.tracks.length} aircraft`);
+  } catch (err) {
+    setStatus(`tracks error: ${err}`);
+  }
+}
+
+function distToSegment(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+// Nearest aircraft whose track passes within `threshold` full-res px of (fx,fy).
+function hitTestTracks(fx, fy, threshold) {
+  let best = null, bestD = threshold;
+  for (const ac of state.tracks) {
+    for (const seg of ac.segments) {
+      if (seg.length === 1) {
+        const d = Math.hypot(fx - seg[0][0], fy - seg[0][1]);
+        if (d < bestD) { bestD = d; best = ac; }
+        continue;
+      }
+      for (let i = 0; i < seg.length - 1; i++) {
+        const d = distToSegment(fx, fy, seg[i][0], seg[i][1], seg[i + 1][0], seg[i + 1][1]);
+        if (d < bestD) { bestD = d; best = ac; }
+      }
+    }
+  }
+  return best;
+}
+
+const INFO_FIELDS = [
+  ["atype", "type", (v) => v],
+  ["alt_geom", "alt", (v) => v.toFixed(0) + " ft"],
+  ["gs", "g/s", (v) => v.toFixed(0) + " kt"],
+  ["track", "track", (v) => v.toFixed(0) + "°"],
+  ["oat", "OAT", (v) => v.toFixed(1) + " °C"],
+];
+function showAircraft(ac) {
+  const info = ac.info || {};
+  const rows = [`<tr><th>icao</th><td class="mono">${ac.icao}</td></tr>`];
+  for (const [key, label, fmt] of INFO_FIELDS) {
+    const v = info[key];
+    if (v === undefined || v === null || v === "") continue;
+    rows.push(`<tr><th>${label}</th><td class="mono">${typeof v === "number" ? fmt(v) : v}</td></tr>`);
+  }
+  $("aircraft-info").innerHTML = "<h2>Aircraft</h2><table>" + rows.join("") + "</table>";
+}
+
 canvas.addEventListener("click", (ev) => {
   if (!state.img) return;
   const rect = canvas.getBoundingClientRect();
@@ -161,6 +275,22 @@ canvas.addEventListener("click", (ev) => {
   const cy = (ev.clientY - rect.top) * (canvas.height / rect.height);
   const fullX = cx * (state.full.w / canvas.width);
   const fullY = cy * (state.full.h / canvas.height);
+
+  // Prefer a flight-track hit (threshold ~8 CSS px in full-res units).
+  if (state.tracks.length) {
+    const ac = hitTestTracks(fullX, fullY, 8 * (state.full.w / rect.width));
+    if (ac) {
+      state.selectedIcao = ac.icao;
+      state.marker = null;
+      showAircraft(ac);
+      drawCanvas();
+      return;
+    }
+  }
+
+  // Otherwise geolocate the clicked point.
+  state.selectedIcao = null;
+  $("aircraft-info").innerHTML = "";
   state.marker = { x: fullX, y: fullY };
   drawCanvas();
   geolocateAt(fullX, fullY);
@@ -169,6 +299,15 @@ canvas.addEventListener("click", (ev) => {
 $("copy").addEventListener("click", () => {
   const lon = $("r-lon").textContent, lat = $("r-lat").textContent;
   if (lon !== "—") navigator.clipboard.writeText(`${lon},${lat}`);
+});
+
+$("aircraft-toggle").addEventListener("change", loadTracks);
+let tlenDebounce = null;
+$("tlen").addEventListener("input", () => {
+  $("tlen-readout").textContent = `${$("tlen").value} min`;
+  if (!aircraftEnabled()) return;
+  clearTimeout(tlenDebounce);
+  tlenDebounce = setTimeout(loadTracks, 150);
 });
 
 const FULL_DAY = { min: 1, max: 86396 };

@@ -40,7 +40,15 @@
         <input type="range" id="altitude" min="0.5" max="15" step="0.1" value="10" />
       </label>
 
-      <p class="hint">Click anywhere on the image to geolocate at the assumed altitude.</p>
+      <label class="check">
+        <input type="checkbox" id="aircraft-toggle" /> Overlay aircraft (ADS-B)
+      </label>
+      <label>Trail length: <span id="tlen-readout" class="mono">30 min</span>
+        <input type="range" id="tlen" min="5" max="120" step="5" value="30" />
+      </label>
+
+      <p class="hint">Click the image to geolocate at the assumed altitude, or a
+        flight track to identify the aircraft.</p>
     </section>
 
     <section class="viewport">
@@ -60,6 +68,7 @@
       </table>
       <button id="copy">Copy lon,lat</button>
       <p id="warn" class="warn"></p>
+      <div id="aircraft-info" class="aircraft-info"></div>
     </section>
   </main>
 
