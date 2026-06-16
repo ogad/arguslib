@@ -19,8 +19,14 @@
       </label>
 
       <label>Date (UTC, YYYY-MM-DD)
-        <input type="text" id="date" inputmode="numeric"
-               pattern="\d{4}-\d{2}-\d{2}" placeholder="YYYY-MM-DD" maxlength="10" />
+        <span class="date-field">
+          <input type="text" id="date" inputmode="numeric"
+                 pattern="\d{4}-\d{2}-\d{2}" placeholder="YYYY-MM-DD" maxlength="10" />
+          <button type="button" id="date-pick" title="Pick date from calendar">📅</button>
+          <!-- backs the text field: its native calendar dialog is opened via
+               showPicker(); value is always ISO so the text field stays YYYY-MM-DD -->
+          <input type="date" id="date-native" class="date-native" tabindex="-1" aria-hidden="true" />
+        </span>
       </label>
 
       <label>Time <span id="time-readout" class="mono"></span>

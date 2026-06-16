@@ -173,6 +173,19 @@ $("copy").addEventListener("click", () => {
 
 $("instrument").addEventListener("change", () => scheduleFrame(0));
 $("date").addEventListener("change", () => scheduleFrame(0));
+
+// Calendar button: open the hidden native date picker, seeded from the text
+// field. Its value is ISO (YYYY-MM-DD), so syncing it back keeps the format.
+$("date-pick").addEventListener("click", () => {
+  const native = $("date-native");
+  if (/^\d{4}-\d{2}-\d{2}$/.test($("date").value)) native.value = $("date").value;
+  if (native.showPicker) native.showPicker();
+  else native.focus(); // fallback for browsers without showPicker()
+});
+$("date-native").addEventListener("change", () => {
+  const v = $("date-native").value;
+  if (v) { $("date").value = v; scheduleFrame(0); }
+});
 $("time").addEventListener("input", () => { currentDatetime(); scheduleFrame(); });
 $("altitude").addEventListener("input", () => {
   $("alt-readout").textContent = parseFloat($("altitude").value).toFixed(1) + " km";
@@ -188,6 +201,7 @@ const DEFAULTS = { instrument: "COBALT:3-7", date: "2025-05-01" }; // time set i
     $("instrument").value = DEFAULTS.instrument;
   }
   $("date").value = DEFAULTS.date;
+  $("date-native").value = DEFAULTS.date;
   currentDatetime();
   loadFrame();
 })();

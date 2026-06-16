@@ -29,8 +29,28 @@ main {
   color: #b7bECd;
 }
 .controls select,
-.controls input[type="date"] { width: 100%; margin-top: 0.25rem; }
+.controls input[type="text"] { width: 100%; margin-top: 0.25rem; }
 .controls input[type="range"] { width: 100%; }
+.date-field {
+  position: relative;
+  display: flex;
+  gap: 0.25rem;
+  align-items: stretch;
+  margin-top: 0.25rem;
+}
+.date-field input[type="text"] { flex: 1; margin-top: 0; }
+.date-field button { margin-top: 0; padding: 0.2rem 0.5rem; background: #2a2f3a; }
+.date-field button:hover { background: #353c4a; }
+/* Rendered but visually hidden so the native picker can still anchor to it. */
+.date-native {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
 .hint, .warn { font-size: 0.8rem; color: #8b94a7; }
 .warn { color: #e0a458; min-height: 1.2rem; }
 .viewport {
